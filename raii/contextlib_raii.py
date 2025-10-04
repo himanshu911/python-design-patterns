@@ -10,7 +10,11 @@ from contextlib import contextmanager
 def database_connection(host: str, port: int):
     """RAII-style database connection using contextmanager decorator."""
     # Acquire resource
-    connection = {"host": host, "port": port, "active": True}
+    connection: dict[str, str | int | bool] = {
+        "host": host,
+        "port": port,
+        "active": True,
+    }
     print(f"Connected to {host}:{port}")
 
     try:

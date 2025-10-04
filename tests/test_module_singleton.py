@@ -19,6 +19,7 @@ def test_module_singleton_state_persistence():
 
     # Re-import should have same state
     from singleton.module_singleton import db_connection as conn2
+
     assert conn2.connected is True
 
 
