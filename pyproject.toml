@@ -1,0 +1,44 @@
+[tool.ruff]
+# Set the desired maximum line length (same as Black's default)
+# line-length = 88
+
+# Set your target Python version. Using a modern version is essential for Upgrades (UP)
+target-version = "py312" # Use a version that matches your project (e.g., py38, py39, py310, etc.)
+
+# By default, Ruff excludes common directories like .venv, build, dist, etc.
+# Only specify 'exclude' if you need to add more paths.
+
+
+# Essential Rules:
+# E & F: Pyflakes and pycodestyle Errors (basic bug and style checks)
+# I: isort (import sorting)
+# UP: pyupgrade (modernizing syntax like f-strings)
+[tool.ruff.lint]
+preview = true
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # Pyflakes (bug checks)
+    "I",    # isort (import sorting)
+    "UP",   # pyupgrade (modernizes code)
+    "RUF029", # unused async (function declared async but doesn't use async features)
+]
+ignore = [
+    "E501",  # Line too long
+]
+
+# Ruff Format: Minimal settings to ensure Black compatibility
+[tool.ruff.format]
+# The following settings are the default for Ruff, which are Black-compatible.
+# You generally don't need to specify them unless you want to deviate.
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]

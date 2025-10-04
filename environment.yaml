@@ -1,0 +1,18 @@
+name: pdp
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.12.11
+  - fastcore
+  - matplotlib
+  - jupyter
+  - ipykernel
+  - ruff
+  - pre-commit
+  - pytest
+  - pip
+  - pip:
+    - aiofiles
+    - httpx
