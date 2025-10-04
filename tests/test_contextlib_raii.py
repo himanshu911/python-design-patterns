@@ -1,5 +1,5 @@
 import os
-import pytest
+
 from raii.contextlib_raii import database_connection, temporary_file
 
 
@@ -65,7 +65,7 @@ def test_temporary_file_writes_content():
         f.flush()  # Ensure data is written
 
         # Read while file is still open (in another handle)
-        with open(filename, "r") as read_f:
+        with open(filename) as read_f:
             content = read_f.read()
             assert content == "Test data"
 

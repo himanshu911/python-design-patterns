@@ -1,5 +1,7 @@
 import os
+
 import pytest
+
 from raii.file_handler import FileHandler
 
 
@@ -13,7 +15,7 @@ def test_file():
         os.remove(filepath)
 
 
-def test_file_handler_creates_and_closes_file(test_file):
+def test_file_handler_creates_and_closes_file(test_file: str):
     """Test that FileHandler properly opens and closes file."""
     with FileHandler(test_file, "w") as f:
         f.write("Test content")
@@ -23,18 +25,18 @@ def test_file_handler_creates_and_closes_file(test_file):
     assert f.closed
 
 
-def test_file_handler_writes_content(test_file):
+def test_file_handler_writes_content(test_file: str):
     """Test that content is written correctly."""
     with FileHandler(test_file, "w") as f:
         f.write("Hello RAII!")
 
     # Verify content was written
-    with open(test_file, "r") as f:
+    with open(test_file) as f:
         content = f.read()
         assert content == "Hello RAII!"
 
 
-def test_file_handler_reads_content(test_file):
+def test_file_handler_reads_content(test_file: str):
     """Test that FileHandler can read files."""
     # Create file first
     with open(test_file, "w") as f:
@@ -46,7 +48,7 @@ def test_file_handler_reads_content(test_file):
         assert content == "Read this content"
 
 
-def test_file_handler_cleanup_on_exception(test_file):
+def test_file_handler_cleanup_on_exception(test_file: str):
     """Test that file is closed even when exception occurs."""
     file_object = None
 
@@ -63,20 +65,20 @@ def test_file_handler_cleanup_on_exception(test_file):
     assert file_object.closed
 
 
-def test_file_handler_multiple_operations(test_file):
+def test_file_handler_multiple_operations(test_file: str):
     """Test multiple write operations."""
     with FileHandler(test_file, "w") as f:
         f.write("Line 1\n")
         f.write("Line 2\n")
         f.write("Line 3\n")
 
-    with open(test_file, "r") as f:
+    with open(test_file) as f:
         lines = f.readlines()
         assert len(lines) == 3
         assert lines[0] == "Line 1\n"
 
 
-def test_file_handler_different_modes(test_file):
+def test_file_handler_different_modes(test_file: str):
     """Test FileHandler with different file modes."""
     # Write mode
     with FileHandler(test_file, "w") as f:
