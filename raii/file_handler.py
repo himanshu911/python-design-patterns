@@ -21,7 +21,16 @@ class FileHandler:
         return self.file
 
     def __exit__(self, exc_type: type, exc_val: Exception, exc_tb: TracebackType):
-        """Release resource"""
+        """Release resource
+
+        Parameters automatically passed by Python:
+        - exc_type: Exception class if error occurred, None otherwise
+        - exc_val: Exception instance with error message, None otherwise
+        - exc_tb: Traceback object with stack trace, None otherwise
+
+        Return False to propagate exceptions (don't suppress errors).
+        Return True would suppress the exception (rarely desired).
+        """
         if self.file:
             self.file.close()
             print(f"Closed {self.filename}")
