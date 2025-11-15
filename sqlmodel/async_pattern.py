@@ -66,104 +66,96 @@ class TestUserAsync(SQLModel, table=True):
 
 
 # ============================================================================
-# PATTERN 1: ASYNC SESSION-BASED (ORM) - RECOMMENDED FOR MODEL OPERATIONS
+# PATTERN 1: ASYNC SESSION (ORM) - Auto-commit, Auto-rollback, Auto-close
 # ============================================================================
-# Use when: Working with SQLModel/SQLAlchemy models, need ORM features, handling concurrent requests
-# Pros: Type-safe, automatic relationship handling, identity map, non-blocking
-# Cons: Slight overhead, more abstraction
+# Use for: Working with SQLModel objects, concurrent requests, ORM features
 
 
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    AsyncSession pattern with automatic transaction management.
-
-    - AsyncSession wraps an AsyncConnection and adds ORM features
-    - Commit happens on successful exit, rollback on exception
-    - Session is returned to the connection pool on close
-    - All operations are non-blocking (await required)
-    """
+    """AsyncSession with automatic transaction management."""
     session = AsyncSessionLocal()
     try:
         yield session
-        await session.commit()  # Await required!
+        await session.commit()  # Auto-commit on success
     except Exception:
-        await session.rollback()  # Await required!
+        await session.rollback()  # Auto-rollback on error
         raise
     finally:
-        await session.close()  # Await required!
+        await session.close()  # Auto-close, return to pool
 
 
 async def pattern_1_async_session():
     """Pattern 1: AsyncSession-based ORM operations"""
     print("\n=== PATTERN 1: ASYNC SESSION (ORM) ===")
 
-    # Insert using ORM
+    # Insert using ORM (auto-flush on commit, explicit flush not needed)
     async with get_session() as db:
         user = TestUserAsync(name="Bob")
         db.add(user)
-        # Commit happens automatically in __aexit__
+        # No manual flush needed - auto-flushes on commit (line 80)
 
-    # Query using ORM
+    # Flush demo: Get auto-generated ID before commit
     async with get_session() as db:
-        result = await db.execute(select(TestUserAsync))  # Must await!
+        user = TestUserAsync(name="Charlie")
+        db.add(user)
+        print(f"Before flush: ID = {user.id}")  # None
+
+        # Explicit flush: Send INSERT to DB, get ID back (no commit yet)
+        await db.flush()
+        print(f"After flush: ID = {user.id}")  # Populated!
+        # Use case: Need ID to create related objects before commit
+
+    # Query using ORM (auto-flush before query, explicit flush not needed)
+    async with get_session() as db:
+        user = TestUserAsync(name="Diana")
+        db.add(user)
+        # Auto-flush happens HERE before execute() - no manual flush needed
+        result = await db.execute(select(TestUserAsync))
         users = result.scalars().all()
         print(f"Users via AsyncSession: {[u.name for u in users]}")
 
 
 # ============================================================================
-# PATTERN 2: ASYNC CONNECTION WITH MANUAL TRANSACTION CONTROL
+# PATTERN 2: ASYNC CONNECTION (MANUAL) - Manual everything
 # ============================================================================
-# Use when: Need fine-grained transaction control, executing raw SQL, bulk operations
-# Pros: Full control over transactions, lower overhead than Session, non-blocking
-# Cons: Manual commit/rollback required, no ORM features
+# Use for: Fine-grained transaction control, raw SQL with manual commits
 
 
 async def pattern_2_async_connection_manual():
     """Pattern 2: AsyncConnection with manual transaction management"""
     print("\n=== PATTERN 2: ASYNC CONNECTION (MANUAL TRANSACTION) ===")
 
-    # Get a connection from the pool
-    conn: AsyncConnection = await engine.connect()  # Must await!
+    conn: AsyncConnection = await engine.connect()
     try:
-        # Execute raw SQL
         await conn.execute(
             text("INSERT INTO test_users_async (name) VALUES (:name)"),
             {"name": "Charlie"},
         )
+        await conn.commit()  # Manual commit required
 
-        # Must explicitly commit
-        await conn.commit()  # Must await!
-
-        # Query
         result = await conn.execute(text("SELECT name FROM test_users_async"))
         rows = result.fetchall()
         print(f"Users via AsyncConnection: {[row[0] for row in rows]}")
 
     except Exception:
-        # Must explicitly rollback on error
-        await conn.rollback()  # Must await!
+        await conn.rollback()  # Manual rollback required
         raise
     finally:
-        # Return connection to pool
-        await conn.close()  # Must await!
+        await conn.close()  # Manual close required
 
 
 # ============================================================================
-# PATTERN 3: ASYNC CONNECTION WITH AUTOMATIC TRANSACTION (BEGIN)
+# PATTERN 3: ASYNC CONNECTION.BEGIN() - Auto-commit, Auto-rollback, Auto-close
 # ============================================================================
-# Use when: Want automatic transaction handling without ORM overhead, non-blocking operations
-# Pros: Auto-commit/rollback, cleaner code than manual transaction, non-blocking
-# Cons: No ORM features, entire block is one transaction
+# Use for: Raw SQL with automatic transaction management
 
 
 async def pattern_3_async_connection_begin():
     """Pattern 3: AsyncConnection with automatic transaction (begin)"""
     print("\n=== PATTERN 3: ASYNC CONNECTION.BEGIN (AUTO-TRANSACTION) ===")
 
-    # Context manager automatically begins transaction and commits on exit
-    async with engine.begin() as conn:  # async with!
-        # Everything in this block is part of one transaction
+    async with engine.begin() as conn:
         await conn.execute(
             text("INSERT INTO test_users_async (name) VALUES (:name)"),
             {"name": "Diana"},
@@ -173,28 +165,22 @@ async def pattern_3_async_connection_begin():
         rows = result.fetchall()
         print(f"Users via AsyncBegin: {[row[0] for row in rows]}")
 
-        # Automatic commit on successful exit
-        # Automatic rollback if exception occurs
-
 
 # ============================================================================
-# PATTERN 4: ASYNC ENGINE.CONNECT() CONTEXT MANAGER
+# PATTERN 4: ASYNC ENGINE.CONNECT() - Manual commit, Auto-rollback, Auto-close
 # ============================================================================
-# Use when: Want connection pooling with context manager, simpler than manual close
-# Pros: Automatic connection cleanup, cleaner than manual close, non-blocking
-# Cons: Still need manual transaction control
+# Use for: Multiple transactions in one connection, manual commit control
 
 
 async def pattern_4_async_engine_connect_context():
     """Pattern 4: AsyncEngine.connect() with context manager"""
     print("\n=== PATTERN 4: ASYNC ENGINE.CONNECT (CONTEXT MANAGER) ===")
 
-    # Connection automatically closed on exit
-    async with engine.connect() as conn:  # async with!
+    async with engine.connect() as conn:
         await conn.execute(
             text("INSERT INTO test_users_async (name) VALUES (:name)"), {"name": "Eve"}
         )
-        await conn.commit()  # Still need manual commit + await
+        await conn.commit()  # Manual commit required
 
         result = await conn.execute(text("SELECT COUNT(*) FROM test_users_async"))
         count = result.scalar()
@@ -204,16 +190,13 @@ async def pattern_4_async_engine_connect_context():
 # ============================================================================
 # PATTERN 5: CONCURRENT OPERATIONS (UNIQUE TO ASYNC)
 # ============================================================================
-# Use when: Need to execute multiple independent database operations concurrently
-# Pros: Significant performance improvement for I/O-bound operations
-# Cons: Must ensure operations are truly independent (no shared state issues)
+# Use for: Multiple independent operations running concurrently
 
 
 async def pattern_5_concurrent_operations():
     """Pattern 5: Concurrent async operations using asyncio.gather"""
     print("\n=== PATTERN 5: CONCURRENT OPERATIONS ===")
 
-    # Define multiple independent operations
     async def insert_user(name: str):
         async with get_session() as db:
             user = TestUserAsync(name=name)
@@ -237,111 +220,72 @@ async def pattern_5_concurrent_operations():
         insert_user("Grace"),
         count_users(),
         get_all_users(),
-        return_exceptions=True,  # Don't fail all if one fails
+        return_exceptions=True,
     )
 
     print(f"Concurrent results: {results}")
 
 
 # ============================================================================
-# COMPARISON SUMMARY
+# COMPARISON TABLE
 # ============================================================================
 
 """
+TRANSACTION MANAGEMENT COMPARISON (ASYNC):
+
+┌──────────────────────────┬─────────────┬───────────────┬────────────┬─────────────┐
+│ Pattern                  │ Auto-Commit │ Auto-Rollback │ Auto-Close │ Works With  │
+├──────────────────────────┼─────────────┼───────────────┼────────────┼─────────────┤
+│ 1. get_session()         │     ✅      │      ✅       │     ✅     │ ORM Models  │
+│ 2. conn (manual)         │     ❌      │      ❌       │     ❌     │ Raw SQL     │
+│ 3. engine.begin()        │     ✅      │      ✅       │     ✅     │ Raw SQL     │
+│ 4. engine.connect()      │     ❌      │      ✅*      │     ✅     │ Raw SQL     │
+│ 5. asyncio.gather()      │     N/A     │      N/A      │    N/A     │ Concurrent  │
+└──────────────────────────┴─────────────┴───────────────┴────────────┴─────────────┘
+
+* Rollback only if commit() is NOT called
+
+
 DECISION TREE (ASYNC):
 
-1. Working with SQLModel classes/relationships?
-   → Use ASYNC SESSION (Pattern 1)
+1. Working with SQLModel objects/relationships?
+   → Use get_session() (Pattern 1)
 
-2. Need raw SQL but want auto-transaction?
-   → Use ASYNC CONNECTION.BEGIN (Pattern 3)
+2. Raw SQL with automatic transaction?
+   → Use engine.begin() (Pattern 3)
 
-3. Need multiple small transactions with fine control?
-   → Use ASYNC CONNECTION with manual commit (Pattern 2)
+3. Raw SQL with multiple separate transactions?
+   → Use engine.connect() (Pattern 4)
 
-4. Simple one-off query?
-   → Use ASYNC ENGINE.CONNECT context manager (Pattern 4)
+4. Raw SQL with full manual control?
+   → Use conn manual (Pattern 2)
 
-5. Multiple independent operations that can run concurrently?
-   → Use CONCURRENT OPERATIONS with asyncio.gather (Pattern 5)
-
-
-ASYNC vs SYNC CONSIDERATIONS:
-
-When to use ASYNC:
-  ✓ Web applications with concurrent users (FastAPI, aiohttp)
-  ✓ I/O-bound operations (multiple DB queries, API calls)
-  ✓ Need high concurrency with low memory overhead
-  ✓ Modern async frameworks (asyncio ecosystem)
-
-When to use SYNC:
-  ✓ Simple scripts or CLI tools
-  ✓ CPU-bound operations
-  ✓ Existing sync codebase
-  ✓ Simpler debugging and error handling
+5. Multiple independent operations concurrently?
+   → Use asyncio.gather() (Pattern 5)
 
 
-TRANSACTION BEHAVIOR (ASYNC):
+KEY DIFFERENCES:
 
-AsyncSession:
-  - Transaction starts on first operation
-  - Must await session.commit()
-  - Can have multiple flushes before commit
-  - Non-blocking I/O
+AsyncSession vs AsyncConnection:
+  AsyncSession   → ORM layer, works with objects, identity map, relationships
+  AsyncConnection → Raw SQL, lower-level, lighter weight, no ORM features
 
-AsyncConnection (manual):
-  - Transaction starts on first operation
-  - Must await conn.commit()
-  - Full control over savepoints
-  - Non-blocking I/O
+engine.begin() vs engine.connect():
+  begin()   → Automatic commit/rollback (like get_session for raw SQL)
+  connect() → Manual commit, auto-rollback if uncommitted, auto-close
 
-AsyncConnection.begin():
-  - Transaction starts immediately
-  - Auto-commits on __aexit__ (success)
-  - Auto-rolls back on exception
-  - Non-blocking I/O
+Async vs Sync:
+  Async → Non-blocking I/O, high concurrency, use for web apps (FastAPI)
+  Sync  → Blocking I/O, simpler, use for scripts/CLI tools
 
 
-ASYNC CONNECTION vs ASYNC SESSION:
+ASYNC REQUIREMENTS:
 
-AsyncConnection:
-  - Lower level, closer to DBAPI
-  - Works with SQL expressions/text
-  - No identity map or ORM features
-  - Lighter weight
-  - Non-blocking I/O
-
-AsyncSession:
-  - Higher level ORM abstraction
-  - Works with model objects
-  - Identity map (object caching)
-  - Relationship loading
-  - Unit of work pattern
-  - Non-blocking I/O
-
-
-IMPORTANT ASYNC GOTCHAS:
-
-1. Always use 'await' for DB operations:
-   ❌ conn.execute(...)
-   ✓ await conn.execute(...)
-
-2. Use 'async with' for context managers:
-   ❌ with engine.connect() as conn:
-   ✓ async with engine.connect() as conn:
-
-3. Use asyncpg driver (not psycopg2):
-   ❌ postgresql://...
-   ✓ postgresql+asyncpg://...
-
-4. Install required packages:
-   - asyncpg (async driver)
-   - greenlet (for run_sync operations)
-   - sqlalchemy[asyncio]
-
-5. Avoid blocking operations in async code:
-   ❌ time.sleep(1)
-   ✓ await asyncio.sleep(1)
+1. Always use 'await':        await conn.execute(...)
+2. Use 'async with':          async with engine.connect() as conn:
+3. Use asyncpg driver:        postgresql+asyncpg://...
+4. Install dependencies:      asyncpg, greenlet, sqlalchemy[asyncio]
+5. Avoid blocking ops:        await asyncio.sleep(1)  # not time.sleep(1)
 """
 
 

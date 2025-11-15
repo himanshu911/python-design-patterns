@@ -52,100 +52,92 @@ class TestUser(SQLModel, table=True):
 
 
 # ============================================================================
-# PATTERN 1: SESSION-BASED (ORM) - RECOMMENDED FOR MODEL OPERATIONS
+# PATTERN 1: SESSION (ORM) - Auto-commit, Auto-rollback, Auto-close
 # ============================================================================
-# Use when: Working with SQLModel/SQLAlchemy models, need ORM features
-# Pros: Type-safe, automatic relationship handling, identity map, unit of work
-# Cons: Slight overhead, more abstraction
+# Use for: Working with SQLModel objects, relationships, type safety
 
 
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
-    """
-    Session pattern with automatic transaction management.
-
-    - Session wraps a Connection and adds ORM features
-    - Commit happens on successful exit, rollback on exception
-    - Session is returned to the connection pool on close
-    """
+    """Session with automatic transaction management."""
     session = SessionLocal()
     try:
         yield session
-        session.commit()  # Explicit commit on success
+        session.commit()  # Auto-commit on success
     except Exception:
-        session.rollback()  # Rollback on failure
+        session.rollback()  # Auto-rollback on error
         raise
     finally:
-        session.close()  # Return connection to pool
+        session.close()  # Auto-close, return to pool
 
 
 def pattern_1_session():
     """Pattern 1: Session-based ORM operations"""
     print("\n=== PATTERN 1: SESSION (ORM) ===")
 
-    # Insert using ORM
+    # Insert using ORM (auto-flush on commit, explicit flush not needed)
     with get_session() as db:
         user = TestUser(name="Bob")
         db.add(user)
-        # Commit happens automatically in __exit__
+        # No manual flush needed - auto-flushes on commit (line 66)
 
-    # Query using ORM
+    # Flush demo: Get auto-generated ID before commit
     with get_session() as db:
+        user = TestUser(name="Charlie")
+        db.add(user)
+        print(f"Before flush: ID = {user.id}")  # None
+
+        db.flush()  # Explicit flush: Send INSERT to DB, get ID back (no commit yet)
+        print(f"After flush: ID = {user.id}")  # Populated!
+        # Use case: Need ID to create related objects before commit
+
+    # Query using ORM (auto-flush before query, explicit flush not needed)
+    with get_session() as db:
+        user = TestUser(name="Diana")
+        db.add(user)
+        # Auto-flush happens HERE before execute() - no manual flush needed
         result = db.execute(select(TestUser)).scalars().all()
         print(f"Users via Session: {[u.name for u in result]}")
 
 
 # ============================================================================
-# PATTERN 2: CONNECTION WITH MANUAL TRANSACTION CONTROL
+# PATTERN 2: CONNECTION (MANUAL) - Manual everything
 # ============================================================================
-# Use when: Need fine-grained transaction control, executing raw SQL
-# Pros: Full control over transactions, lower overhead than Session
-# Cons: Manual commit/rollback required, no ORM features
+# Use for: Fine-grained transaction control, raw SQL with manual commits
 
 
 def pattern_2_connection_manual():
     """Pattern 2: Connection with manual transaction management"""
     print("\n=== PATTERN 2: CONNECTION (MANUAL TRANSACTION) ===")
 
-    # Get a connection from the pool
     conn: Connection = engine.connect()
     try:
-        # Execute raw SQL
         conn.execute(
             text("INSERT INTO test_users (name) VALUES (:name)"), {"name": "Charlie"}
         )
+        conn.commit()  # Manual commit required
 
-        # Must explicitly commit
-        conn.commit()
-
-        # Query
         result = conn.execute(text("SELECT name FROM test_users"))
         print(f"Users via Connection: {[row[0] for row in result]}")
 
     except Exception:
-        # Must explicitly rollback on error
-        conn.rollback()
+        conn.rollback()  # Manual rollback required
         raise
     finally:
-        # Return connection to pool
-        conn.close()
+        conn.close()  # Manual close required
 
 
 # ============================================================================
-# PATTERN 3: CONNECTION WITH AUTOMATIC TRANSACTION (BEGIN)
+# PATTERN 3: CONNECTION.BEGIN() - Auto-commit, Auto-rollback, Auto-close
 # ============================================================================
-# Use when: Want automatic transaction handling without ORM overhead
-# Pros: Auto-commit/rollback, cleaner code than manual transaction
-# Cons: No ORM features, entire block is one transaction
+# Use for: Raw SQL with automatic transaction management
 
 
 def pattern_3_connection_begin():
     """Pattern 3: Connection with automatic transaction (begin)"""
     print("\n=== PATTERN 3: CONNECTION.BEGIN (AUTO-TRANSACTION) ===")
 
-    # Context manager automatically begins transaction and commits on exit
     with engine.begin() as conn:
-        # Everything in this block is part of one transaction
         conn.execute(
             text("INSERT INTO test_users (name) VALUES (:name)"), {"name": "Diana"}
         )
@@ -153,28 +145,22 @@ def pattern_3_connection_begin():
         result = conn.execute(text("SELECT name FROM test_users"))
         print(f"Users via Begin: {[row[0] for row in result]}")
 
-        # Automatic commit on successful exit
-        # Automatic rollback if exception occurs
-
 
 # ============================================================================
-# PATTERN 4: ENGINE.CONNECT() CONTEXT MANAGER
+# PATTERN 4: ENGINE.CONNECT() - Manual commit, Auto-rollback, Auto-close
 # ============================================================================
-# Use when: Want connection pooling with context manager, simpler than manual close
-# Pros: Automatic connection cleanup, cleaner than manual close
-# Cons: Still need manual transaction control
+# Use for: Multiple transactions in one connection, manual commit control
 
 
 def pattern_4_engine_connect_context():
     """Pattern 4: Engine.connect() with context manager"""
     print("\n=== PATTERN 4: ENGINE.CONNECT (CONTEXT MANAGER) ===")
 
-    # Connection automatically closed on exit
     with engine.connect() as conn:
         conn.execute(
             text("INSERT INTO test_users (name) VALUES (:name)"), {"name": "Eve"}
         )
-        conn.commit()  # Still need manual commit
+        conn.commit()  # Manual commit required
 
         result = conn.execute(text("SELECT COUNT(*) FROM test_users"))
         count = result.scalar()
@@ -182,57 +168,48 @@ def pattern_4_engine_connect_context():
 
 
 # ============================================================================
-# COMPARISON SUMMARY
+# COMPARISON TABLE
 # ============================================================================
 
 """
+TRANSACTION MANAGEMENT COMPARISON:
+
+┌──────────────────────────┬─────────────┬───────────────┬────────────┬─────────────┐
+│ Pattern                  │ Auto-Commit │ Auto-Rollback │ Auto-Close │ Works With  │
+├──────────────────────────┼─────────────┼───────────────┼────────────┼─────────────┤
+│ 1. get_session()         │     ✅      │      ✅       │     ✅      │ ORM Models  │
+│ 2. conn (manual)         │     ❌      │      ❌       │     ❌      │ Raw SQL     │
+│ 3. engine.begin()        │     ✅      │      ✅       │     ✅      │ Raw SQL     │
+│ 4. engine.connect()      │     ❌      │      ✅       │     ✅      │ Raw SQL     │
+└──────────────────────────┴─────────────┴───────────────┴────────────┴─────────────┘
+
+* Rollback only if commit() is NOT called
+
+
 DECISION TREE:
 
-1. Working with SQLModel classes/relationships?
-   → Use SESSION (Pattern 1)
+1. Working with SQLModel objects/relationships?
+   → Use get_session() (Pattern 1)
 
-2. Need raw SQL but want auto-transaction?
-   → Use CONNECTION.BEGIN (Pattern 3)
+2. Raw SQL with automatic transaction?
+   → Use engine.begin() (Pattern 3)
 
-3. Need multiple small transactions with fine control?
-   → Use CONNECTION with manual commit (Pattern 2)
+3. Raw SQL with multiple separate transactions?
+   → Use engine.connect() (Pattern 4)
 
-4. Simple one-off query?
-   → Use ENGINE.CONNECT context manager (Pattern 4)
-
-
-TRANSACTION BEHAVIOR:
-
-Session:
-  - Transaction starts on first operation
-  - Must call session.commit() or use context manager
-  - Can have multiple flushes before commit
-
-Connection (manual):
-  - Transaction starts on first operation
-  - Must call conn.commit()
-  - Full control over savepoints
-
-Connection.begin():
-  - Transaction starts immediately
-  - Auto-commits on __exit__ (success)
-  - Auto-rolls back on exception
+4. Raw SQL with full manual control?
+   → Use conn manual (Pattern 2)
 
 
-CONNECTION vs SESSION:
+KEY DIFFERENCES:
 
-Connection:
-  - Lower level, closer to DBAPI
-  - Works with SQL expressions/text
-  - No identity map or ORM features
-  - Lighter weight
+Session vs Connection:
+  Session   → ORM layer, works with objects, identity map, relationships
+  Connection → Raw SQL, lower-level, lighter weight, no ORM features
 
-Session:
-  - Higher level ORM abstraction
-  - Works with model objects
-  - Identity map (object caching)
-  - Relationship loading
-  - Unit of work pattern
+engine.begin() vs engine.connect():
+  begin()   → Automatic commit/rollback (like get_session for raw SQL)
+  connect() → Manual commit, auto-rollback if uncommitted, auto-close
 """
 
 
